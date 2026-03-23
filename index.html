@@ -3,31 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>CollabDraw Socket.io - PC & Mobile</title>
+    <title>CollabDraw Pro - Salles Privées & Synchro Écran</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
-        :root { --primary: #2563eb; --dark: #0f172a; }
-        body { font-family: sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #f1f5f9; }
-        header { background: var(--dark); color: white; padding: 15px; text-align: center; font-weight: bold; }
-        .toolbar { display: flex; justify-content: center; gap: 15px; padding: 10px; background: white; border-bottom: 1px solid #ddd; }
-        #canvas-container { flex-grow: 1; display: flex; justify-content: center; align-items: center; padding: 10px; }
-        canvas { background: white; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); touch-action: none; }
-        button { padding: 8px 15px; border-radius: 5px; border: none; background: var(--primary); color: white; cursor: pointer; }
+        :root { --primary: #2563eb; --dark: #0f172a; --accent: #10b981; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #f1f5f9; }
+        
+        /* Écran de sélection de salle */
+        #room-selection { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.9); color: white; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; transition: opacity 0.5s; }
+        #room-selection input { padding: 15px; border-radius: 8px; border: none; font-size: 1.2rem; margin-bottom: 15px; width: 250px; text-align: center; }
+        #room-selection button { padding: 15px 30px; font-size: 1.2rem; background: var(--accent); border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: bold; }
+
+        /* Interface principale */
+        header { background: var(--dark); color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+        .toolbar { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; padding: 10px; background: white; border-bottom: 1px solid #ddd; }
+        
+        #canvas-container { flex-grow: 1; display: flex; justify-content: center; align-items: center; padding: 10px; background: #cbd5e1; }
+        canvas { background: white; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); touch-action: none; }
+        
+        button.tool { padding: 8px 15px; border-radius: 5px; border: none; background: var(--primary); color: white; cursor: pointer; font-weight: 600; }
         .btn-clear { background: #ef4444; }
-        #status { font-size: 0.8rem; margin-top: 5px; color: #10b981; }
+        .room-badge { background: #1e293b; padding: 5px 10px; border-radius: 4px; color: var(--accent); font-family: monospace; }
     </style>
 </head>
 <body>
 
+<div id="room-selection">
+    <h1>Bienvenue sur CollabDraw</h1>
+    <p>Entrez un nom de salle pour commencer</p>
+    <input type="text" id="room-name-input" placeholder="Ex: projet-design" maxlength="20">
+    <button onclick="joinRoom()">Rejoindre la Planche</button>
+</div>
+
 <header>
-    CollabDraw Temps Réel
-    <div id="status">Connexion au serveur...</div>
+    <div>CollabDraw <span style="opacity: 0.5">v2.0</span></div>
+    <div>Salle : <span id="current-room-display" class="room-badge">Aucune</span></div>
 </header>
 
 <div class="toolbar">
     <input type="color" id="colorPicker" value="#2563eb">
-    <input type="range" id="lineWidth" min="1" max="20" value="5">
-    <button class="btn-clear" onclick="clearCanvas()">Effacer tout</button>
+    <input type="range" id="lineWidth" min="1" max="25" value="5">
+    <button class="tool btn-clear" onclick="clearCanvas()">Effacer tout</button>
+    <button class="tool" style="background: #10b981;" onclick="downloadImage()">Sauvegarder</button>
 </div>
 
 <div id="canvas-container">
@@ -35,34 +52,70 @@
 </div>
 
 <script>
-    // 1. CONNEXION AU SERVEUR (REMPLACEZ L'URL CI-DESSOUS)
-    const socket = io('https://mon-dessin-collab.onrender.com'); 
+    // --- 1. CONFIGURATION ---
+    // REMPLACEZ PAR VOTRE URL RENDER RÉELLE
+    const URL_SERVEUR = 'https://mon-dessin-collab.onrender.com'; 
+    const socket = io(URL_SERVEUR); 
     
     const canvas = document.getElementById('paintCanvas');
     const ctx = canvas.getContext('2d');
-    const status = document.getElementById('status');
     let drawing = false;
+    let currentRoom = '';
 
-    socket.on('connect', () => { status.innerText = "Connecté au serveur en direct ✅"; });
+    // --- 2. GESTION DES SALLES PRIVÉES ---
+    function joinRoom() {
+        const input = document.getElementById('room-name-input');
+        currentRoom = input.value.trim().toLowerCase();
+        
+        if (currentRoom === '') return alert("Veuillez entrer un nom de salle !");
 
-    function init() {
-        canvas.width = window.innerWidth * 0.95;
-        canvas.height = window.innerHeight * 0.7;
+        // On cache l'écran de sélection
+        document.getElementById('room-selection').style.opacity = '0';
+        setTimeout(() => document.getElementById('room-selection').style.display = 'none', 500);
+        
+        // On affiche le nom de la salle
+        document.getElementById('current-room-display').innerText = currentRoom;
+
+        // On informe le serveur
+        socket.emit('join_room', currentRoom);
+    }
+
+    // --- 3. INITIALISATION DU CANVAS ET SYNCHRO ÉCRAN ---
+    function initCanvas() {
+        // On définit une taille interne FIXE pour le canvas (ex: Full HD)
+        // C'est la clé pour que les coordonnées relatives fonctionnent.
+        canvas.width = 1920; 
+        canvas.height = 1080;
+
+        // On ajuste l'affichage visuel (CSS) pour qu'il s'adapte à l'écran
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.style.maxWidth = '1000px'; // Optionnel : limite la taille sur grand écran PC
+        canvas.style.maxHeight = '70vh';
+
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
     }
 
-    // --- LOGIQUE DE DESSIN ---
-    function getPos(e) {
+    // --- 4. LOGIQUE DE DESSIN AVEC COORDONNÉES RELATIVES ---
+    function getMousePos(e) {
         const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;   // Rapport taille interne / taille affichée
+        const scaleY = canvas.height / rect.height;
+
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        return { x: clientX - rect.left, y: clientY - rect.top };
+
+        // Calcule les coordonnées réelles à l'intérieur du canvas de 1920x1080
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
     }
 
     function startDrawing(e) {
         drawing = true;
-        const pos = getPos(e);
+        const pos = getMousePos(e);
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
         if (e.type === 'touchstart') e.preventDefault();
@@ -72,15 +125,15 @@
         if (!drawing) return;
         if (e.type === 'touchmove') e.preventDefault();
 
-        const pos = getPos(e);
+        const pos = getMousePos(e);
         const color = document.getElementById('colorPicker').value;
         const width = document.getElementById('lineWidth').value;
 
         // On dessine localement
         renderStroke(pos.x, pos.y, color, width);
 
-        // On envoie au serveur pour les autres
-        socket.emit('drawing', { x: pos.x, y: pos.y, color, width });
+        // On envoie les coordonnées RÉELLES (1920x1080) et la SALLE au serveur
+        socket.emit('drawing', { x: pos.x, y: pos.y, color, width, room: currentRoom });
     }
 
     function renderStroke(x, y, color, width) {
@@ -92,7 +145,8 @@
         ctx.moveTo(x, y);
     }
 
-    // --- RÉCEPTION DES DONNÉES ---
+    // --- 5. RÉCEPTION DES DONNÉES ---
+    // On reçoit le dessin (qui est déjà aux bonnes coordonnées 1920x1080)
     socket.on('drawing', (data) => {
         renderStroke(data.x, data.y, data.color, data.width);
     });
@@ -102,12 +156,20 @@
     });
 
     function clearCanvas() {
-        if(confirm("Effacer pour tout le monde ?")) {
+        if(confirm("Effacer toute la planche pour la salle " + currentRoom + " ?")) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            socket.emit('clear');
+            socket.emit('clear', currentRoom);
         }
     }
 
+    function downloadImage() {
+        const link = document.createElement('a');
+        link.download = 'collabdraw-' + currentRoom + '.png';
+        link.href = canvas.toDataURL();
+        link.click();
+    }
+
+    // --- 6. ÉVÉNEMENTS ---
     canvas.addEventListener('mousedown', startDrawing);
     canvas.addEventListener('mousemove', draw);
     window.addEventListener('mouseup', () => { drawing = false; ctx.beginPath(); });
@@ -116,8 +178,7 @@
     canvas.addEventListener('touchmove', draw, {passive: false});
     canvas.addEventListener('touchend', () => { drawing = false; ctx.beginPath(); });
 
-    window.addEventListener('resize', init);
-    init();
+    initCanvas();
 </script>
 </body>
 </html>
