@@ -3,118 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>CollabDraw Pro - PC & Mobile</title>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <title>CollabDraw Socket.io - PC & Mobile</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
-        :root {
-            --primary: #2563eb;
-            --dark: #0f172a;
-            --accent: #38bdf8;
-        }
-
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            background-color: #f1f5f9;
-            overflow: hidden; /* Empêche le scroll du body sur mobile */
-        }
-
-        header {
-            background: var(--dark);
-            color: white;
-            padding: 10px 15px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-        }
-
-        .connection-box {
-            display: flex;
-            gap: 5px;
-        }
-
-        input[type="text"] {
-            padding: 8px;
-            border-radius: 4px;
-            border: none;
-            outline: none;
-            width: 140px;
-        }
-
-        .toolbar {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 12px;
-            background: white;
-            padding: 8px;
-            border-bottom: 1px solid #ddd;
-            flex-wrap: wrap;
-        }
-
-        #canvas-container {
-            flex-grow: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: #cbd5e1;
-            padding: 10px;
-        }
-
-        canvas {
-            background: white;
-            border-radius: 4px;
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
-            touch-action: none; /* Crucial pour mobile : désactive les gestes par défaut du navigateur */
-        }
-
-        button {
-            padding: 8px 12px;
-            border-radius: 6px;
-            border: none;
-            background: var(--primary);
-            color: white;
-            font-weight: 600;
-            cursor: pointer;
-        }
-
-        button.clear { background: #ef4444; }
-        
-        .id-badge {
-            background: #1e293b;
-            padding: 5px 10px;
-            border-radius: 4px;
-            border: 1px solid var(--accent);
-            font-family: monospace;
-            color: var(--accent);
-        }
+        :root { --primary: #2563eb; --dark: #0f172a; }
+        body { font-family: sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #f1f5f9; }
+        header { background: var(--dark); color: white; padding: 15px; text-align: center; font-weight: bold; }
+        .toolbar { display: flex; justify-content: center; gap: 15px; padding: 10px; background: white; border-bottom: 1px solid #ddd; }
+        #canvas-container { flex-grow: 1; display: flex; justify-content: center; align-items: center; padding: 10px; }
+        canvas { background: white; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); touch-action: none; }
+        button { padding: 8px 15px; border-radius: 5px; border: none; background: var(--primary); color: white; cursor: pointer; }
+        .btn-clear { background: #ef4444; }
+        #status { font-size: 0.8rem; margin-top: 5px; color: #10b981; }
     </style>
 </head>
 <body>
 
 <header>
-    <div>
-        <strong>CollabDraw</strong> 
-        <span style="font-size: 0.8rem; opacity: 0.8;">ID:</span> 
-        <span id="peer-id-display" class="id-badge">Connexion...</span>
-    </div>
-    <div class="connection-box">
-        <input type="text" id="remote-id" placeholder="ID Partenaire">
-        <button onclick="connectToPeer()">Connecter</button>
-    </div>
+    CollabDraw Temps Réel
+    <div id="status">Connexion au serveur...</div>
 </header>
 
 <div class="toolbar">
     <input type="color" id="colorPicker" value="#2563eb">
-    <input type="range" id="lineWidth" min="1" max="25" value="5">
-    <button class="clear" onclick="clearCanvas()">Effacer</button>
-    <button style="background: #10b981;" onclick="downloadImage()">Sauvegarder</button>
+    <input type="range" id="lineWidth" min="1" max="20" value="5">
+    <button class="btn-clear" onclick="clearCanvas()">Effacer tout</button>
 </div>
 
 <div id="canvas-container">
@@ -122,50 +35,29 @@
 </div>
 
 <script>
+    // 1. CONNEXION AU SERVEUR (REMPLACEZ L'URL CI-DESSOUS)
+    const socket = io('https://mon-dessin-serveur.onrender.com'); 
+    
     const canvas = document.getElementById('paintCanvas');
     const ctx = canvas.getContext('2d');
-    const colorPicker = document.getElementById('colorPicker');
-    const lineWidth = document.getElementById('lineWidth');
-    const peerIdDisplay = document.getElementById('peer-id-display');
-    
+    const status = document.getElementById('status');
     let drawing = false;
-    let peer;
-    let connection;
 
-    // --- 1. Initialisation ---
+    socket.on('connect', () => { status.innerText = "Connecté au serveur en direct ✅"; });
+
     function init() {
-        resizeCanvas();
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        
-        peer = new Peer(); 
-
-        peer.on('open', (id) => {
-            peerIdDisplay.innerText = id;
-        });
-
-        peer.on('connection', (conn) => {
-            setupConnection(conn);
-        });
-    }
-
-    function resizeCanvas() {
-        // Ajuste la taille selon l'écran (PC ou Mobile)
         canvas.width = window.innerWidth * 0.95;
         canvas.height = window.innerHeight * 0.7;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
     }
 
-    // --- 2. Logique de Dessin (Mixte PC/Mobile) ---
+    // --- LOGIQUE DE DESSIN ---
     function getPos(e) {
         const rect = canvas.getBoundingClientRect();
-        // Détecte si c'est un toucher (mobile) ou un clic (PC)
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        
-        return {
-            x: clientX - rect.left,
-            y: clientY - rect.top
-        };
+        return { x: clientX - rect.left, y: clientY - rect.top };
     }
 
     function startDrawing(e) {
@@ -173,7 +65,6 @@
         const pos = getPos(e);
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
-        // Empêche le scroll sur mobile pendant le dessin
         if (e.type === 'touchstart') e.preventDefault();
     }
 
@@ -182,19 +73,14 @@
         if (e.type === 'touchmove') e.preventDefault();
 
         const pos = getPos(e);
-        const color = colorPicker.value;
-        const width = lineWidth.value;
+        const color = document.getElementById('colorPicker').value;
+        const width = document.getElementById('lineWidth').value;
 
+        // On dessine localement
         renderStroke(pos.x, pos.y, color, width);
 
-        if (connection && connection.open) {
-            connection.send({ x: pos.x, y: pos.y, color, width, type: 'draw' });
-        }
-    }
-
-    function stopDrawing() {
-        drawing = false;
-        ctx.beginPath();
+        // On envoie au serveur pour les autres
+        socket.emit('drawing', { x: pos.x, y: pos.y, color, width });
     }
 
     function renderStroke(x, y, color, width) {
@@ -206,58 +92,32 @@
         ctx.moveTo(x, y);
     }
 
-    // --- 3. Collaboration ---
-    function connectToPeer() {
-        const remoteId = document.getElementById('remote-id').value;
-        if(!remoteId) return alert("Entrez un ID !");
-        const conn = peer.connect(remoteId);
-        setupConnection(conn);
-    }
+    // --- RÉCEPTION DES DONNÉES ---
+    socket.on('drawing', (data) => {
+        renderStroke(data.x, data.y, data.color, data.width);
+    });
 
-    function setupConnection(conn) {
-        connection = conn;
-        connection.on('data', (data) => {
-            if (data.type === 'draw') {
-                renderStroke(data.x, data.y, data.color, data.width);
-            } else if (data.type === 'clear') {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-            }
-        });
-        connection.on('open', () => {
-            alert("Liaison établie avec succès !");
-        });
-    }
+    socket.on('clear', () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
 
     function clearCanvas() {
-        if(confirm("Effacer toute la planche ?")) {
+        if(confirm("Effacer pour tout le monde ?")) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (connection) connection.send({ type: 'clear' });
+            socket.emit('clear');
         }
     }
 
-    function downloadImage() {
-        const link = document.createElement('a');
-        link.download = 'dessin-collaboratif.png';
-        link.href = canvas.toDataURL();
-        link.click();
-    }
-
-    // --- 4. Événements ---
-    // Souris (PC)
     canvas.addEventListener('mousedown', startDrawing);
     canvas.addEventListener('mousemove', draw);
-    window.addEventListener('mouseup', stopDrawing);
+    window.addEventListener('mouseup', () => { drawing = false; ctx.beginPath(); });
 
-    // Tactile (Mobile)
     canvas.addEventListener('touchstart', startDrawing, {passive: false});
     canvas.addEventListener('touchmove', draw, {passive: false});
-    canvas.addEventListener('touchend', stopDrawing);
+    canvas.addEventListener('touchend', () => { drawing = false; ctx.beginPath(); });
 
-    // Redimensionnement
-    window.addEventListener('resize', resizeCanvas);
-
+    window.addEventListener('resize', init);
     init();
 </script>
-
 </body>
 </html>
