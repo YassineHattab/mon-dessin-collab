@@ -1,17 +1,21 @@
 const io = require('socket.io')(process.env.PORT || 3000, {
-    cors: { origin: "*" } // Autorise GitHub Pages à se connecter
+    cors: { origin: "*" }
 });
 
 io.on('connection', (socket) => {
-    console.log('Un utilisateur est connecté');
-
-    // Quand on reçoit un dessin, on l'envoie à TOUS les autres
-    socket.on('drawing', (data) => {
-        socket.broadcast.emit('drawing', data);
+    // Quand un utilisateur rejoint une salle spécifique
+    socket.on('join_room', (roomName) => {
+        socket.join(roomName);
+        console.log(`Utilisateur connecté à la salle : ${roomName}`);
     });
 
-    // Quand on efface le canvas
-    socket.on('clear', () => {
-        socket.broadcast.emit('clear');
+    // On reçoit le dessin et on le renvoie UNIQUEMENT à la même salle
+    socket.on('drawing', (data) => {
+        // data contient maintenant { x, y, color, width, room }
+        socket.to(data.room).emit('drawing', data);
+    });
+
+    socket.on('clear', (roomName) => {
+        socket.to(roomName).emit('clear');
     });
 });
