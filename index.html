@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CollabDraw - Planche Collaborative</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --dark: #1e293b;
+            --light: #f8fafc;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #e2e8f0;
+        }
+
+        /* Barre d'outils */
+        header {
+            background: var(--dark);
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px auto;
+            width: fit-content;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+
+        /* Zone de dessin */
+        #canvas-container {
+            flex-grow: 1;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            background: white;
+            cursor: crosshair;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            touch-action: none;
+        }
+
+        /* Inputs & Buttons */
+        button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            background: var(--primary);
+            color: white;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.8; }
+        button.secondary { background: #64748b; }
+        
+        .status { font-size: 0.8rem; color: #cbd5e1; }
+        #peer-id-display { font-weight: bold; color: #38bdf8; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div>
+        <strong>CollabDraw v1.0</strong>
+        <span class="status"> | ID Session: <span id="peer-id-display">Connexion...</span></span>
+    </div>
+    <div>
+        <input type="text" id="remote-id" placeholder="ID du partenaire">
+        <button onclick="connectToPeer()">Rejoindre</button>
+    </div>
+</header>
+
+<div class="toolbar">
+    <input type="color" id="colorPicker" value="#000000">
+    <input type="range" id="lineWidth" min="1" max="20" value="5">
+    <button class="secondary" onclick="clearCanvas()">Effacer tout</button>
+    <button onclick="downloadCanvas()">Exporter PNG</button>
+</div>
+
+<div id="canvas-container">
+    <canvas id="paintCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('paintCanvas');
+    const ctx = canvas.getContext('2d');
+    const colorPicker = document.getElementById('colorPicker');
+    const lineWidth = document.getElementById('lineWidth');
+    const peerIdDisplay = document.getElementById('peer-id-display');
+    
+    let drawing = false;
+    let peer;
+    let connection;
+
+    // --- Configuration Initiale ---
+    function init() {
+        canvas.width = window.innerWidth * 0.8;
+        canvas.height = window.innerHeight * 0.7;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        // Initialisation PeerJS (Génère un ID unique)
+        peer = new Peer(); 
+
+        peer.on('open', (id) => {
+            peerIdDisplay.innerText = id;
+        });
+
+        // Écouter les connexions entrantes
+        peer.on('connection', (conn) => {
+            setupConnection(conn);
+        });
+    }
+
+    // --- Logique de Dessin ---
+    function startDrawing(e) {
+        drawing = true;
+        draw(e);
+    }
+
+    function stopDrawing() {
+        drawing = false;
+        ctx.beginPath();
+    }
+
+    function draw(e) {
+        if (!drawing) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const color = colorPicker.value;
+        const width = lineWidth.value;
+
+        renderStroke(x, y, color, width);
+
+        // Envoyer les coordonnées au partenaire
+        if (connection && connection.open) {
+            connection.send({ x, y, color, width, type: 'draw' });
+        }
+    }
+
+    function renderStroke(x, y, color, width) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    }
+
+    // --- Collaboration ---
+    function connectToPeer() {
+        const remoteId = document.getElementById('remote-id').value;
+        const conn = peer.connect(remoteId);
+        setupConnection(conn);
+    }
+
+    function setupConnection(conn) {
+        connection = conn;
+        connection.on('data', (data) => {
+            if (data.type === 'draw') {
+                renderStroke(data.x, data.y, data.color, data.width);
+            } else if (data.type === 'clear') {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+        alert("Connecté à : " + conn.peer);
+    }
+
+    function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (connection) connection.send({ type: 'clear' });
+    }
+
+    function downloadCanvas() {
+        const link = document.createElement('a');
+        link.download = 'mon-dessin.png';
+        link.href = canvas.toDataURL();
+        link.click();
+    }
+
+    // --- Event Listeners ---
+    canvas.addEventListener('mousedown', startDrawing);
+    canvas.addEventListener('mousemove', draw);
+    window.addEventListener('mouseup', stopDrawing);
+
+    init();
+</script>
+
+</body>
+</html>
